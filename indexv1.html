@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TVOC Concentration Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .chart-container {
+            width: 80%;
+            max-width: 600px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>TVOC Concentration Monitor</h1>
+    <p>Monitoring TVOC concentration in real-time</p>
+    <div class="chart-container">
+        <canvas id="tvocChart"></canvas>
+    </div>
+
+    <script>
+        var broker = {
+            hostname: "192.168.1.134",
+            port: 9001,
+            clientId: "web_" + Math.random().toString(16).substr(2, 8)
+        };
+
+        var topic = "/test";
+
+        // MQTT client instance
+        var client = new Paho.MQTT.Client(broker.hostname, broker.port, broker.clientId);
+
+        // Chart.js setup
+        var ctx = document.getElementById('tvocChart').getContext('2d');
+        var tvocData = {
+            labels: [], // Time labels
+            datasets: [{
+                label: 'TVOC Concentration (ppm)',
+                data: [],
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        };
+
+        var tvocChart = new Chart(ctx, {
+            type: 'line',
+            data: tvocData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'TVOC Concentration (ppm)'
+                        },
+                        min: 0
+                    }
+                }
+            }
+        });
+
+        function onConnect() {
+            console.log("Connected to MQTT broker");
+            client.subscribe(topic);
+            console.log("Subscribed to topic: " + topic);
+        }
+
+        function onFailure(message) {
+            console.log("Connection to MQTT broker failed: " + message.errorMessage);
+        }
+
+        function onMessageArrived(message) {
+            console.log("Received message: " + message.payloadString);
+            let tvocValue = parseFloat(message.payloadString);
+            let currentTime = new Date().toLocaleTimeString();
+
+            // Update chart
+            if (tvocChart.data.labels.length >= 20) {
+                tvocChart.data.labels.shift();
+                tvocChart.data.datasets[0].data.shift();
+            }
+
+            tvocChart.data.labels.push(currentTime);
+            tvocChart.data.datasets[0].data.push(tvocValue);
+            tvocChart.update();
+        }
+
+        // Set callback functions
+        client.onConnectionLost = onFailure;
+        client.onMessageArrived = onMessageArrived;
+
+        // Connect to MQTT broker
+        client.connect({
+            onSuccess: onConnect,
+            onFailure: onFailure,
+            useSSL: false,
+            userName: "admin",
+            password: "admin"
+        });
+
+    </script>
+</body>
+</html>

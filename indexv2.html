@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TVOC Concentration Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>TVOC Concentration Monitor</h1>
+
+    <div class="settings">
+        <label for="maxLimit">Set TVOC Limit (ppm):</label>
+        <input type="number" id="maxLimit" min="0" step="0.02" value="0.61">
+        <button onclick="setLimit()">Set Limit</button>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="tvocChart"></canvas>
+    </div>
+
+    <div id="notification" class="notification"></div>
+    <style>
+        body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f9;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+}
+
+h1 {
+    color: #333;
+}
+
+.chart-container {
+    width: 80%;
+    max-width: 600px;
+    margin-top: 20px;
+}
+
+.settings {
+    margin-top: 20px;
+}
+
+.settings label {
+    font-size: 1rem;
+}
+
+.settings input {
+    font-size: 1rem;
+    margin-left: 10px;
+    padding: 5px;
+}
+
+.settings button {
+    font-size: 1rem;
+    margin-left: 10px;
+    padding: 5px 10px;
+    cursor: pointer;
+}
+
+.notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: #ffcccb;
+    color: #333;
+    padding: 10px 20px;
+    border-radius: 5px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    display: none;
+}
+
+.notification.show {
+    display: block;
+}
+
+    </style>
+
+    <script>
+        // MQTT Broker Configuration for Secure Connection
+        var broker = {
+            hostname: "192.168.1.134", // Replace with your broker's hostname or IP
+            port: 9001, // Secure WebSocket port configured in Node.js server
+            clientId: "web_" + Math.random().toString(16).substr(2, 8)
+        };
+    
+        var topic = "/tvoc"; // Topic to subscribe to
+        var alertTopic = "/alert"; // Topic to publish alerts
+        var maxLimit = 0.61; // Default maximum TVOC limit
+    
+        // MQTT client instance using Paho
+        client = new Paho.MQTT.Client(broker.hostname, broker.port, broker.clientId);
+    
+        // Set up callbacks for the MQTT client
+        client.onConnectionLost = function (responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("Connection lost: " + responseObject.errorMessage);
+            }
+        };
+
+        function send(value){
+            let alertMessage = new Paho.MQTT.Message(value.toString());
+                alertMessage.destinationName = alertTopic;
+                client.send(alertMessage); // Publish to topic alert
+        }
+
+        //Map function to convert TVOC ppm readings into Ventilation PWM
+        function map(value, in_min, in_max, out_min, out_max) {
+            return ((value - in_min) * (out_max - out_min)) / (in_max - in_min) + out_min;
+        }
+        
+            client.onMessageArrived = function (message) {
+            console.log("Received message: " + message.payloadString);
+            let tvocValue = parseFloat(message.payloadString);
+            let currentTime = new Date().toLocaleTimeString();
+
+            //Send PWM for Ventilation
+            if(tvocValue>0.2 && tvocValue<maxLimit){
+                let pwm = Math.round(map(tvocValue, 0.2, maxLimit, 0, 255));
+                let alertMessage = new Paho.MQTT.Message(pwm.toString());
+                alertMessage.destinationName = alertTopic;
+                client.send(alertMessage); // Publish alert
+            } else if(tvocValue>=maxLimit){
+                send('255');
+            } else {
+                send('0');
+            }
+    
+            // Check if TVOC value exceeds the limit
+            if (tvocValue > maxLimit) {
+                // Show notification
+                showNotification("Alert! TVOC concentration exceeded the limit of " + maxLimit + " ppm.");
+            }
+    
+            // Update chart (keep only the last 20 data points)
+            if (tvocChart.data.labels.length >= 20) {
+                tvocChart.data.labels.shift();
+                tvocChart.data.datasets[0].data.shift();
+            }
+    
+            tvocChart.data.labels.push(currentTime);
+            tvocChart.data.datasets[0].data.push(tvocValue);
+            tvocChart.update();
+        };
+    
+        // Connect to the MQTT broker with TLS enabled
+        client.connect({
+            onSuccess: function () {
+                console.log("Connected securely to MQTT broker");
+                client.subscribe(topic); // Subscribe to the topic
+                console.log("Subscribed to topic: " + topic);
+            },
+            onFailure: function (error) {
+                console.error("Connection failed: " + error.errorMessage);
+            },
+            useSSL: false // Enable secure connection
+        });
+    
+        // Function to set a new TVOC limit
+        function setLimit() {
+            maxLimit = parseFloat(document.getElementById("maxLimit").value);
+        }
+    
+        // Show notification on the web page
+        function showNotification(message) {
+            var notification = document.getElementById("notification");
+            notification.textContent = message;
+            notification.classList.add("show");
+            setTimeout(() => {
+                notification.classList.remove("show");
+            }, 2500);
+        }
+    
+        // Chart.js setup for TVOC visualization
+        var ctx = document.getElementById("tvocChart").getContext("2d");
+        var tvocData = {
+            labels: [], // Time labels
+            datasets: [{
+                label: "TVOC (ppm)",
+                data: [],
+                backgroundColor: "rgba(75, 192, 192, 0.2)",
+                borderColor: "rgba(75, 192, 192, 1)",
+                borderWidth: 0.5
+            }]
+        };
+    
+        var tvocChart = new Chart(ctx, {
+            type: "line",
+            data: tvocData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: "Time"
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: "TVOC (ppm)"
+                        },
+                        min: 0
+                    }
+                }
+            }
+        });
+    </script>
+    
+</body>
+</html>
