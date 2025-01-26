@@ -1,4 +1,5 @@
 import paho.mqtt.client as mqtt
+import ssl
 
 limit = 6000
 
@@ -8,11 +9,11 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe("/tvoc")       # Subscribe to tvoc topic
     client.subscribe("/limit")  # Subscribe to limit topic send by web interface
 
+# When messages are received
 
 def on_message(client, userdata, msg):
     global limit
     if msg.topic == "/tvoc":
-        # Encrypt and forward to /encrypted
         tvoc = int(msg.payload)
         if tvoc >= 200 and tvoc <= limit:
             tvoc = round(convert(tvoc,200,limit,25,255))
@@ -24,6 +25,7 @@ def on_message(client, userdata, msg):
     elif msg.topic == "/limit":
         limit = int(msg.payload)
     
+# calculates correct PWM depending on TVOC value received
 
 def convert(value, min, max, c_min, c_max):
         value = ((value - min) * (c_max - c_min)) / (max - min) + c_min
@@ -34,6 +36,7 @@ def convert(value, min, max, c_min, c_max):
 client = mqtt.Client()
 client.on_connect = on_connect
 client.on_message = on_message
-client.username_pw_set(username="admin", password="admin")
-client.connect("192.168.1.134", 1883)  # Adjust broker IP and port
+client.tls_set("./certs/ca.crt", tls_version=ssl.PROTOCOL_TLSv1_2)
+client.tls_insecure_set(True)
+client.connect("192.168.1.134", 8883)
 client.loop_forever()
