@@ -1,36 +1,47 @@
 import paho.mqtt.client as mqtt
 import ssl
 
-limit = 6000
+with open('limit.txt', 'r') as f:
+    limit = int(f.readline())
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
     print("Connected with result code", rc)
-    client.subscribe("/tvoc")       # Subscribe to tvoc topic
-    client.subscribe("/limit")  # Subscribe to limit topic send by web interface
+    client.subscribe("/tvoc")  # Subscribe to tvoc topic
+    client.subscribe("/limit")  # Subscribe to limit topic sent by web interface
+    client.subscribe("/on")  # Subscribe to on to send first limit value to webpage
 
 # When messages are received
-
 def on_message(client, userdata, msg):
     global limit
     if msg.topic == "/tvoc":
         tvoc = int(msg.payload)
         if tvoc >= 200 and tvoc <= limit:
-            tvoc = round(convert(tvoc,200,limit,25,255))
-            (rc,mid)=client.publish('/pwm',str(tvoc))
-        elif tvoc <200:
-            (rc,mid)=client.publish('/pwm','25')
+            pwm = round(convert(tvoc, 200, limit, 25, 255))
+        elif tvoc < 200:
+            pwm = 25
         elif tvoc > limit:
-            (rc,mid)=client.publish('/pwm','255')
+            pwm = 255
+
+        if prev_tvoc != tvoc:  # Fixed indentation here
+            (rc, mid) = client.publish('/pwm', str(pwm))
+            prev_tvoc = tvoc
+
     elif msg.topic == "/limit":
         limit = int(msg.payload)
-    
-# calculates correct PWM depending on TVOC value received
+        if limit > 3000 or limit < 200:
+            limit = 1400
+            (rc, mid) = client.publish('/limit', str(limit))
+        with open('limit.txt', 'w') as f:
+            f.write(str(limit))
 
+    elif msg.topic == "/on":
+        (rc, mid) = client.publish('/limit', str(limit))
+
+# Calculates correct PWM depending on TVOC value received
 def convert(value, min, max, c_min, c_max):
-        value = ((value - min) * (c_max - c_min)) / (max - min) + c_min
-        return value
-
+    value = ((value - min) * (c_max - c_min)) / (max - min) + c_min
+    return value
 
 # MQTT Client Setup
 client = mqtt.Client()
